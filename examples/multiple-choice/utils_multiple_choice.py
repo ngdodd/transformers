@@ -503,6 +503,49 @@ class ArcProcessor(DataProcessor):
         logger.info("four choices: %s", str(four_choice))
 
         return examples
+    
+class QuailProcessor(DataProcessor):
+    def get_train_examples(self, data_dir):
+        print("LOOKING AT {} train".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.jsonl")), "train")
+    
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        print("LOOKING AT {} dev".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.jsonl")), "dev")
+
+    def get_test_examples(self, data_dir):
+        print("LOOKING AT {} test".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "challenge.jsonl")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1", "2", "3"]
+    
+    def _read_json(self, input_file):
+        with open(input_file, "r", encoding="utf-8") as fin:
+            lines = fin.readlines()
+            return lines
+        
+    def _create_examples(self, lines, type):
+        examples = [
+            InputExample(
+                example_id=qa_entry["id"],
+                question=qa_entry["question"],
+                contexts=[qa_entry["context"], 
+                          qa_entry["context"],
+                          qa_entry["context"],
+                          qa_entry["context"]],
+                endings=[qa_entry["answers"][0],
+                         qa_entry["answers"][1],
+                         qa_entry["answers"][2],
+                         qa_entry["answers"][3]],
+                label=qa_entry["correct_answer_id"]
+            )
+            for qa_entry in [json.loads(line) for line in lines]
+        ]
+        
+        return examples
 
 
 def convert_examples_to_features(
@@ -575,5 +618,5 @@ def convert_examples_to_features(
     return features
 
 
-processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor, "syn": SynonymProcessor}
-MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4, "syn", 5}
+processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor, "syn": SynonymProcessor, "quail": QuailProcessor}
+MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4, "syn", 5, "quail", 4}
