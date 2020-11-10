@@ -582,13 +582,14 @@ def convert_examples_to_features(
                 truncation=True,
                 return_overflowing_tokens=True,
             )
+            """
             if "num_truncated_tokens" in inputs and inputs["num_truncated_tokens"] > 0:
                 logger.info(
                     "Attention! you are cropping tokens (swag task is ok). "
                     "If you are training ARC and RACE and you are poping question + options,"
                     "you need to try to use a bigger max seq length!"
                 )
-
+            """
             choices_inputs.append(inputs)
 
         label = label_map[example.label]
