@@ -1118,8 +1118,8 @@ class DebertaForMultipleChoice(DebertaPreTrainedModel):
             return_dict=return_dict,
         )
 
-        pooled_output = outputs[0]
-
+        encoder_layer = outputs[0]
+        pooled_output = self.pooler(encoder_layer)
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         reshaped_logits = logits.view(-1, num_choices)
