@@ -214,19 +214,18 @@ def main():
         output_preds_file = os.path.join(training_args.output_dir, "preds.json")
         if trainer.is_world_master():
             with open(output_preds_file, 'w', encoding='utf-8') as writer:
-              json.dump(results, writer, separators=(',', ':'), sort_keys=True, indent=4)
+                json.dump(results, writer, separators=(',', ':'), sort_keys=True, indent=4)
 
         output_labels_file = os.path.join(training_args.output_dir, "labels.json")
         if trainer.is_world_master():
             with open(output_labels_file, 'w', encoding='utf-8') as writer:
-                    json.dump(predictions.label_ids.tolist(), writer, separators=(',', ':'), sort_keys=True, indent=4)
+                json.dump(predictions.label_ids.tolist(), writer, separators=(',', ':'), sort_keys=True, indent=4)
 
         output_metrics_file = os.path.join(training_args.output_dir, "metrics.json")
         if trainer.is_world_master():
             with open(output_metrics_file, 'w', encoding='utf-8') as writer:
                 json.dump(predictions.metrics, writer, separators=(',', ':'), sort_keys=True, indent=4)
         
-            
         result = trainer.evaluate()
 
         output_eval_file = os.path.join(training_args.output_dir, "eval_results.txt")

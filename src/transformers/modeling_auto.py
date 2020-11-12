@@ -96,7 +96,11 @@ from .modeling_camembert import (
     CamembertModel,
 )
 from .modeling_ctrl import CTRLLMHeadModel, CTRLModel
-from .modeling_deberta import DebertaForSequenceClassification, DebertaModel
+from .modeling_deberta import (
+    DebertaForMultipleChoice,
+    DebertaForSequenceClassification, 
+    DebertaModel,
+)
 from .modeling_distilbert import (
     DistilBertForMaskedLM,
     DistilBertForMultipleChoice,
@@ -457,6 +461,7 @@ MODEL_FOR_MULTIPLE_CHOICE_MAPPING = OrderedDict(
         (XLMConfig, XLMForMultipleChoice),
         (FlaubertConfig, FlaubertForMultipleChoice),
         (FunnelConfig, FunnelForMultipleChoice),
+        (DebertaConfig, DebertaForMultipleChoice)
     ]
 )
 
