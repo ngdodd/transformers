@@ -46,6 +46,8 @@ class InputExample:
         endings: list of str. multiple choice's options. Its length must be equal to contexts' length.
         label: (Optional) string. The label of the example. This should be
         specified for train and dev examples, but not for test examples.
+        reasoning_label: (Optional) string. The reasoning type label for the
+        example. Specified for train and dev samples, but not for test samples.
     """
 
     example_id: str
@@ -53,6 +55,7 @@ class InputExample:
     contexts: List[str]
     endings: List[str]
     label: Optional[str]
+    reasoning_label: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,7 @@ class InputFeatures:
     attention_mask: Optional[List[List[int]]]
     token_type_ids: Optional[List[List[int]]]
     label: Optional[int]
+    reasoning_label: Optional[int]
 
 
 class Split(Enum):
@@ -119,6 +123,7 @@ if is_torch_available():
                 else:
                     logger.info(f"Creating features from dataset file at {data_dir}")
                     label_list = processor.get_labels()
+                    reasoning_label_list = processor.get_reasoning_labels()
                     if mode == Split.dev:
                         examples = processor.get_dev_examples(data_dir)
                     elif mode == Split.test:
@@ -129,6 +134,7 @@ if is_torch_available():
                     self.features = convert_examples_to_features(
                         examples,
                         label_list,
+                        reasoning_label_list,
                         max_seq_length,
                         tokenizer,
                     )
@@ -166,6 +172,8 @@ if is_tf_available():
 
             logger.info(f"Creating features from dataset file at {data_dir}")
             label_list = processor.get_labels()
+            reasoning_label_list = processor.get_reasoning_labels()
+            
             if mode == Split.dev:
                 examples = processor.get_dev_examples(data_dir)
             elif mode == Split.test:
@@ -177,6 +185,7 @@ if is_tf_available():
             self.features = convert_examples_to_features(
                 examples,
                 label_list,
+                reasoning_label_list,
                 max_seq_length,
                 tokenizer,
             )
@@ -248,6 +257,9 @@ class DataProcessor:
     def get_labels(self):
         """Gets the list of labels for this data set."""
         raise NotImplementedError()
+        
+    def get_reasoning_labels(self):
+        return None
 
 
 class RaceProcessor(DataProcessor):
@@ -505,6 +517,11 @@ class ArcProcessor(DataProcessor):
         return examples
     
 class QuailProcessor(DataProcessor):
+    def __init__(self):
+        self.reasoning_type_dict = {'Character_identity': 0, 'Causality': 1, 'Event_duration': 2, 
+                                    'Subsequent_state': 3, 'Factual': 4, 'Belief_states': 5, 
+                                    'Entity_properties': 6, 'Unanswerable':7, 'Temporal_order':8}
+        
     def get_train_examples(self, data_dir):
         print("LOOKING AT {} train".format(data_dir))
         return self._create_examples(self._read_json(os.path.join(data_dir, "train.jsonl")), "train")
@@ -521,6 +538,9 @@ class QuailProcessor(DataProcessor):
     def get_labels(self):
         """See base class."""
         return ["0", "1", "2", "3"]
+    
+    def get_reasoning_labels(self):
+        return list(self.reasoning_type_dict.keys())
     
     def _read_json(self, input_file):
         with open(input_file, "r", encoding="utf-8") as fin:
@@ -540,7 +560,8 @@ class QuailProcessor(DataProcessor):
                          qa_entry["answers"][1],
                          qa_entry["answers"][2],
                          qa_entry["answers"][3]],
-                label=qa_entry["correct_answer_id"]
+                label=qa_entry["correct_answer_id"],
+                reasoning_label=qa_entry["question_type"]
             )
             for qa_entry in [json.loads(line) for line in lines]
         ]
@@ -551,6 +572,7 @@ class QuailProcessor(DataProcessor):
 def convert_examples_to_features(
     examples: List[InputExample],
     label_list: List[str],
+    reasoning_label_list: List[str],
     max_length: int,
     tokenizer: PreTrainedTokenizer,
 ) -> List[InputFeatures]:
@@ -559,7 +581,7 @@ def convert_examples_to_features(
     """
 
     label_map = {label: i for i, label in enumerate(label_list)}
-
+    
     features = []
     for (ex_index, example) in tqdm.tqdm(enumerate(examples), desc="convert examples to features"):
         if ex_index % 10000 == 0:
@@ -601,7 +623,10 @@ def convert_examples_to_features(
         token_type_ids = (
             [x["token_type_ids"] for x in choices_inputs] if "token_type_ids" in choices_inputs[0] else None
         )
-
+        
+        reasoning_label_map = {reasoning_label: i for i, reasoning_label in enumerate(reasoning_label_list)} if reasoning_label_list != None else None
+        reasoning_label = reasoning_label_map[example.reasoning_label] if reasoning_label_map != None else None
+        
         features.append(
             InputFeatures(
                 example_id=example.example_id,
@@ -609,6 +634,7 @@ def convert_examples_to_features(
                 attention_mask=attention_mask,
                 token_type_ids=token_type_ids,
                 label=label,
+                reasoning_label=reasoning_label
             )
         )
 

@@ -1068,6 +1068,9 @@ class DebertaForMultipleChoice(DebertaPreTrainedModel):
         self.pooler = ContextPooler(config)
         output_dim = self.pooler.output_dim
         self.classifier = torch.nn.Linear(output_dim, 1)
+        
+        self.reasoning_classifier = torch.nn.Linear(output_dim, 1)
+        self.reasoning_classifier2 = torch.nn.Linear(4, config.reasoning_types)
 
         self.init_weights()
 
@@ -1084,6 +1087,7 @@ class DebertaForMultipleChoice(DebertaPreTrainedModel):
         token_type_ids=None,
         attention_mask=None,
         labels=None,
+        reasoning_label=None,
         position_ids=None,
         head_mask=None,
         inputs_embeds=None,
@@ -1126,19 +1130,23 @@ class DebertaForMultipleChoice(DebertaPreTrainedModel):
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         reshaped_logits = logits.view(-1, num_choices)
-
+        
+        reasoning_logits = self.reasoning_classifier(pooled_output)
+        reshaped_reasoning_logits = reasoning_logits.view(-1, num_choices)
+        reshaped_reasoning_logits = self.reasoning_classifier2(reshaped_reasoning_logits)
+        
         loss = None
-        if labels is not None:
+        if labels is not None and reasoning_label is not None:
             loss_fct = CrossEntropyLoss()
-            loss = loss_fct(reshaped_logits, labels)
+            loss = loss_fct(reshaped_logits, labels) + loss_fct(reshaped_reasoning_logits, reasoning_label)
 
         if not return_dict:
-            output = (reshaped_logits,) + outputs[2:]
+            output = (reshaped_reasoning_logits,) + (reshaped_logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
         return MultipleChoiceModelOutput(
             loss=loss,
-            logits=reshaped_logits,
+            logits=reshaped_reasoning_logits, # TODO: Revisit - do we really want the reasoning logits here?
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )

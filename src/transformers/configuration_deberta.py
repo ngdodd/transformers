@@ -106,6 +106,7 @@ class DebertaConfig(PretrainedConfig):
         pos_att_type=None,
         pooler_dropout=0,
         pooler_hidden_act="gelu",
+        reasoning_types=9,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -136,3 +137,4 @@ class DebertaConfig(PretrainedConfig):
         self.pooler_hidden_size = kwargs.get("pooler_hidden_size", hidden_size)
         self.pooler_dropout = pooler_dropout
         self.pooler_hidden_act = pooler_hidden_act
+        self.reasoning_types = reasoning_types
