@@ -1036,10 +1036,9 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         self.roberta = RobertaModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
+        self.augmented_classifier = nn.Linear(config.hidden_size+config.num_reasoning_types, 1)
+        self.reasoning_classifier = torch.nn.Linear(config.hidden_size, config.num_reasoning_types) if config.with_reasoning_types else None
         
-        self.reasoning_classifier = torch.nn.Linear(config.hidden_size, 1) if config.with_reasoning_types else None
-        self.reasoning_classifier2 = torch.nn.Linear(4, config.num_reasoning_types) if config.with_reasoning_types else None
-
         self.init_weights()
 
     @add_start_docstrings_to_model_forward(ROBERTA_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
@@ -1093,23 +1092,33 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+        
         pooled_output = outputs[1]
-
         pooled_output = self.dropout(pooled_output)
-        logits = self.classifier(pooled_output)
-        reshaped_logits = logits.view(-1, num_choices)
         
         if self.config.with_reasoning_types:
+            # Get reasoning logits: RC maps from n_choices x H -> n_choices x n_reasoning_types
+            # where H is the size of the hidden pooled_output dim
             reasoning_logits = self.reasoning_classifier(pooled_output)
-            reshaped_reasoning_logits = reasoning_logits.view(-1, num_choices)
-            reshaped_reasoning_logits = self.reasoning_classifier2(reshaped_reasoning_logits)
-
+            
+            # Concat reasoning_logits to pooled output to form new inputs to the
+            # final QA classifier: 
+            #       reasoning_logits     - n_choices x n_reasoning_types
+            #       pooled_output        - n_choices x H
+            #       mcq_classifier_input - n_choices x (n_reasoning_types + H)
+            classifier_input = torch.cat((pooled_output, reasoning_logits), dim=1) # TODO: revisit if this is inefficient
+            logits = self.augmented_classifier(classifier_input)
+            
+        else:
+            logits = self.classifier(pooled_output)
+            
+        reshaped_logits = logits.view(-1, num_choices)
+        
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(reshaped_logits, labels)
-            loss += loss_fct(reshaped_reasoning_logits, reasoning_label) if self.config.with_reasoning_types else 0
-
+            
         if not return_dict:
             output = (reshaped_logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
