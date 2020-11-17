@@ -62,6 +62,9 @@ class ModelArguments:
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
+    with_reasoning_types: bool = field(
+        default=False, metadata={"help": "Utilize reasoning type in the model."}
+    )
 
 
 @dataclass
@@ -139,6 +142,7 @@ def main():
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
+        with_reasoning_types=model_args.with_reasoning_types
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
@@ -160,6 +164,7 @@ def main():
             max_seq_length=data_args.max_seq_length,
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.train,
+            with_reasoning_types=model_args.with_reasoning_types,
         )
         if training_args.do_train
         else None
@@ -172,6 +177,7 @@ def main():
             max_seq_length=data_args.max_seq_length,
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.dev,
+            with_reasoning_types=model_args.with_reasoning_types
         )
         if training_args.do_eval
         else None

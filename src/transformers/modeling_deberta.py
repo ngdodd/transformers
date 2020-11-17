@@ -1069,8 +1069,8 @@ class DebertaForMultipleChoice(DebertaPreTrainedModel):
         output_dim = self.pooler.output_dim
         self.classifier = torch.nn.Linear(output_dim, 1)
         
-        self.reasoning_classifier = torch.nn.Linear(output_dim, 1)
-        self.reasoning_classifier2 = torch.nn.Linear(4, config.reasoning_types)
+        self.reasoning_classifier = torch.nn.Linear(output_dim, 1) if config.with_reasoning_types else None
+        self.reasoning_classifier2 = torch.nn.Linear(4, config.num_reasoning_types) if config.with_reasoning_types else None
 
         self.init_weights()
 
@@ -1124,29 +1124,30 @@ class DebertaForMultipleChoice(DebertaPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-
+        
         encoder_layer = outputs[0]
         pooled_output = self.pooler(encoder_layer)
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         reshaped_logits = logits.view(-1, num_choices)
         
-        reasoning_logits = self.reasoning_classifier(pooled_output)
-        reshaped_reasoning_logits = reasoning_logits.view(-1, num_choices)
-        reshaped_reasoning_logits = self.reasoning_classifier2(reshaped_reasoning_logits)
+        if self.config.with_reasoning_types:
+            reasoning_logits = self.reasoning_classifier(pooled_output)
+            reshaped_reasoning_logits = reasoning_logits.view(-1, num_choices)
+            reshaped_reasoning_logits = self.reasoning_classifier2(reshaped_reasoning_logits)
         
         loss = None
-        if labels is not None and reasoning_label is not None:
+        if labels is not None:
             loss_fct = CrossEntropyLoss()
-            loss = loss_fct(reshaped_logits, labels) + loss_fct(reshaped_reasoning_logits, reasoning_label)
-
+            loss = loss_fct(reshaped_logits, labels)
+            loss += loss_fct(reshaped_reasoning_logits, reasoning_label) if self.config.with_reasoning_types else 0
         if not return_dict:
-            output = (reshaped_reasoning_logits,) + (reshaped_logits,) + outputs[2:]
+            output = (reshaped_logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
         return MultipleChoiceModelOutput(
             loss=loss,
-            logits=reshaped_reasoning_logits, # TODO: Revisit - do we really want the reasoning logits here?
+            logits=reshaped_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )

@@ -99,6 +99,7 @@ if is_torch_available():
             max_seq_length: Optional[int] = None,
             overwrite_cache=False,
             mode: Split = Split.train,
+            with_reasoning_types: bool = False,
         ):
             processor = processors[task]()
 
@@ -123,7 +124,7 @@ if is_torch_available():
                 else:
                     logger.info(f"Creating features from dataset file at {data_dir}")
                     label_list = processor.get_labels()
-                    reasoning_label_list = processor.get_reasoning_labels()
+                    reasoning_label_list = processor.get_reasoning_labels() if with_reasoning_types else None
                     if mode == Split.dev:
                         examples = processor.get_dev_examples(data_dir)
                     elif mode == Split.test:
@@ -167,12 +168,13 @@ if is_tf_available():
             max_seq_length: Optional[int] = 128,
             overwrite_cache=False,
             mode: Split = Split.train,
+            with_reasoning_types: bool = False,
         ):
             processor = processors[task]()
 
             logger.info(f"Creating features from dataset file at {data_dir}")
             label_list = processor.get_labels()
-            reasoning_label_list = processor.get_reasoning_labels()
+            reasoning_label_list = processor.get_reasoning_labels() if with_reasoning_types else None
             
             if mode == Split.dev:
                 examples = processor.get_dev_examples(data_dir)

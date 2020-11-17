@@ -82,6 +82,11 @@ class DebertaConfig(PretrainedConfig):
             :obj:`["p2c"]`, :obj:`["p2c", "c2p"]`, :obj:`["p2c", "c2p", 'p2p"]`.
         layer_norm_eps (:obj:`float`, optional, defaults to 1e-12):
             The epsilon used by the layer normalization layers.
+        num_reasoning_types (:obj:`int`, `optional`, defaults to 9 (number of tasks in QuAIL)):
+            The number of reasoning types involved in the task.
+        with_reasoning_types (:obj:`bool`, `optional` defaults to :obj:`False`):
+            Used to specify whether or not to use reasoning type labels in 
+            the model.
     """
     model_type = "deberta"
 
@@ -106,7 +111,8 @@ class DebertaConfig(PretrainedConfig):
         pos_att_type=None,
         pooler_dropout=0,
         pooler_hidden_act="gelu",
-        reasoning_types=9,
+        num_reasoning_types=9,
+        with_reasoning_types=False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -137,4 +143,5 @@ class DebertaConfig(PretrainedConfig):
         self.pooler_hidden_size = kwargs.get("pooler_hidden_size", hidden_size)
         self.pooler_dropout = pooler_dropout
         self.pooler_hidden_act = pooler_hidden_act
-        self.reasoning_types = reasoning_types
+        self.num_reasoning_types = num_reasoning_types
+        self.with_reasoning_types = with_reasoning_types
