@@ -1036,6 +1036,9 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         self.roberta = RobertaModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
+        
+        self.reasoning_classifier = torch.nn.Linear(config.hidden_size, 1) if config.with_reasoning_types else None
+        self.reasoning_classifier2 = torch.nn.Linear(4, config.num_reasoning_types) if config.with_reasoning_types else None
 
         self.init_weights()
 
@@ -1052,6 +1055,7 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         token_type_ids=None,
         attention_mask=None,
         labels=None,
+        reasoning_label=None,
         position_ids=None,
         head_mask=None,
         inputs_embeds=None,
@@ -1094,11 +1098,17 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         reshaped_logits = logits.view(-1, num_choices)
+        
+        if self.config.with_reasoning_types:
+            reasoning_logits = self.reasoning_classifier(pooled_output)
+            reshaped_reasoning_logits = reasoning_logits.view(-1, num_choices)
+            reshaped_reasoning_logits = self.reasoning_classifier2(reshaped_reasoning_logits)
 
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(reshaped_logits, labels)
+            loss += loss_fct(reshaped_reasoning_logits, reasoning_label) if self.config.with_reasoning_types else 0
 
         if not return_dict:
             output = (reshaped_logits,) + outputs[2:]
