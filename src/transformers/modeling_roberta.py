@@ -20,7 +20,7 @@ import warnings
 
 import torch
 import torch.nn as nn
-from torch.nn import CrossEntropyLoss, MSELoss
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from .activations import ACT2FN, gelu
 from .configuration_roberta import RobertaConfig
@@ -1100,6 +1100,8 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
             # Get reasoning logits: RC maps from n_choices x H -> n_choices x n_reasoning_types
             # where H is the size of the hidden pooled_output dim
             reasoning_logits = self.reasoning_classifier(pooled_output)
+            ensembled_reasoning_logits = torch.mean(reasoning_logits, dim=0)
+            reshaped_ensembled_reasoning_logits = ensembled_reasoning_logits.view(-1, self.config.num_reasoning_types)
             
             # Concat reasoning_logits to pooled output to form new inputs to the
             # final QA classifier: 
@@ -1116,8 +1118,9 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         
         loss = None
         if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(reshaped_logits, labels)
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(reshaped_logits, labels)
+                loss += loss_fct(reshaped_ensembled_reasoning_logits, reasoning_label) if self.config.with_reasoning_types else 0
             
         if not return_dict:
             output = (reshaped_logits,) + outputs[2:]
