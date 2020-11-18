@@ -1928,6 +1928,8 @@ class LongformerForMultipleChoice(LongformerPreTrainedModel):
         self.longformer = LongformerModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
+        self.augmented_classifier = nn.Linear(config.hidden_size+config.num_reasoning_types, 1)
+        self.reasoning_classifier = torch.nn.Linear(config.hidden_size, config.num_reasoning_types) if config.with_reasoning_types else None
 
         self.init_weights()
 
@@ -1947,6 +1949,7 @@ class LongformerForMultipleChoice(LongformerPreTrainedModel):
         attention_mask=None,
         global_attention_mask=None,
         labels=None,
+        reasoning_label=None,
         position_ids=None,
         inputs_embeds=None,
         output_attentions=None,
@@ -2000,19 +2003,45 @@ class LongformerForMultipleChoice(LongformerPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+        
         pooled_output = outputs[1]
-
         pooled_output = self.dropout(pooled_output)
-        logits = self.classifier(pooled_output)
+        
+        if self.config.with_reasoning_types:
+            # Get reasoning logits: RC maps from n_choices x H -> n_choices x n_reasoning_types
+            # where H is the size of the hidden pooled_output dim
+            reasoning_logits = self.reasoning_classifier(pooled_output)
+            ensembled_reasoning_logits = torch.mean(reasoning_logits, dim=0)
+            reshaped_ensembled_reasoning_logits = ensembled_reasoning_logits.view(-1, self.config.num_reasoning_types)
+            
+            # Concat reasoning_logits to pooled output to form new inputs to the
+            # final QA classifier: 
+            #       reasoning_logits     - n_choices x n_reasoning_types
+            #       pooled_output        - n_choices x H
+            #       mcq_classifier_input - n_choices x (n_reasoning_types + H)
+            classifier_input = torch.cat((pooled_output, reasoning_logits), dim=1) # TODO: revisit if this is inefficient
+            logits = self.augmented_classifier(classifier_input)
+            
+        else:
+            logits = self.classifier(pooled_output)
+            
         reshaped_logits = logits.view(-1, num_choices)
 
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(reshaped_logits, labels)
+            loss += loss_fct(reshaped_ensembled_reasoning_logits, reasoning_label) if self.config.with_reasoning_types else 0
 
         if not return_dict:
-            output = (reshaped_logits,) + outputs[2:]
+            # Returning the reasoning label in the output is a trick used in order to enable
+            # evaluation of our reasoning_classifier passing through the prediction_loop 
+            # on calls to Trainer::predict. We will be able to access the full history
+            # in order to record accuracy in the calling function of Trainer::predict
+            if self.config.with_reasoning_types:
+                output = (reshaped_logits,) + (reshaped_ensembled_reasoning_logits,) + (reasoning_label,) + outputs[2:]
+            else:
+                output = (reshaped_logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
         return LongformerMultipleChoiceModelOutput(
