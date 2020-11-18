@@ -184,7 +184,7 @@ def main():
     )
 
     def compute_metrics(p: EvalPrediction) -> Dict:
-        preds = np.argmax(p.predictions, axis=1)
+        preds = np.argmax(p.predictions[0], axis=1)
         return {"acc": simple_accuracy(preds, p.label_ids)}
 
     # Initialize our Trainer
@@ -208,43 +208,51 @@ def main():
             tokenizer.save_pretrained(training_args.output_dir)
             
     # Evaluation
-    results = {}
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
-
         predictions = trainer.predict(eval_dataset)
-        preds = np.argmax(predictions.predictions, axis=1)
+        
+        # Get mcq and reasoning preds, labels, and metrics
+        mcq_preds = np.argmax(predictions.predictions[0], axis=1)
+        reasoning_preds = np.argmax(predictions.predictions[1], axis=1)
+        reasoning_labels = predictions.predictions[2]
+        predictions.metrics['reasoning_classifier_eval_acc'] = simple_accuracy(reasoning_preds, reasoning_labels)
+        
+        # Create result dictionaries to be dumped to output json files
         ids = [feature.example_id for feature in eval_dataset.features]
-        results = {id: pred for id, pred in zip(ids, preds.tolist())}
-
+        mcq_results = {id: pred for id, pred in zip(ids, mcq_preds.tolist())}
+        reasoning_results = {id: reasoning_pred for id, reasoning_pred in zip(ids, reasoning_preds.tolist())}
+        
+        # Predictions to be used in eval script
         output_preds_file = os.path.join(training_args.output_dir, "preds.json")
         if trainer.is_world_master():
             with open(output_preds_file, 'w', encoding='utf-8') as writer:
-                json.dump(results, writer, separators=(',', ':'), sort_keys=True, indent=4)
-
-        output_labels_file = os.path.join(training_args.output_dir, "labels.json")
+                json.dump(mcq_results, writer, separators=(',', ':'), sort_keys=True, indent=4)
+                
+        # Reasoning classifier predictions
+        output_reasoning_preds_file = os.path.join(training_args.output_dir, "reasoning_preds.json")
         if trainer.is_world_master():
-            with open(output_labels_file, 'w', encoding='utf-8') as writer:
-                json.dump(predictions.label_ids.tolist(), writer, separators=(',', ':'), sort_keys=True, indent=4)
+            with open(output_reasoning_preds_file, 'w', encoding='utf-8') as writer:
+                json.dump(reasoning_results, writer, separators=(',', ':'), sort_keys=True, indent=4)
 
+        # Reasoning type ground truth labels
+        output_reasoning_labels_file = os.path.join(training_args.output_dir, "reasoning_labels.json")
+        if trainer.is_world_master():
+            with open(output_reasoning_labels_file, 'w', encoding='utf-8') as writer:
+                json.dump(reasoning_labels.tolist(), writer, separators=(',', ':'), sort_keys=True, indent=4)
+
+        # Write prediction metrics to file
         output_metrics_file = os.path.join(training_args.output_dir, "metrics.json")
         if trainer.is_world_master():
             with open(output_metrics_file, 'w', encoding='utf-8') as writer:
                 json.dump(predictions.metrics, writer, separators=(',', ':'), sort_keys=True, indent=4)
         
-        result = trainer.evaluate()
-
-        output_eval_file = os.path.join(training_args.output_dir, "eval_results.txt")
         if trainer.is_world_master():
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                for key, value in result.items():
-                    logger.info("  %s = %s", key, value)
-                    writer.write("%s = %s\n" % (key, value))
+            logger.info("***** Eval results *****")
+            for key, value in predictions.metrics.items():
+                logger.info("  %s = %s", key, value)
 
-                results.update(result)
-
-    return results
+    return mcq_results
 
 
 def _mp_fn(index):

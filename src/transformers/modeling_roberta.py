@@ -1118,12 +1118,19 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         
         loss = None
         if labels is not None:
-                loss_fct = CrossEntropyLoss()
-                loss = loss_fct(reshaped_logits, labels)
-                loss += loss_fct(reshaped_ensembled_reasoning_logits, reasoning_label) if self.config.with_reasoning_types else 0
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(reshaped_logits, labels)
+            loss += loss_fct(reshaped_ensembled_reasoning_logits, reasoning_label) if self.config.with_reasoning_types else 0
             
         if not return_dict:
-            output = (reshaped_logits,) + outputs[2:]
+            # Returning the reasoning label in the output is a trick used in order to enable
+            # evaluation of our reasoning_classifier passing through the prediction_loop 
+            # on calls to Trainer::predict. We will be able to access the full history
+            # in order to record accuracy in the calling function of Trainer::predict
+            if self.config.with_reasoning_types:
+                output = (reshaped_logits,) + (reshaped_ensembled_reasoning_logits,) + (reasoning_label,) + outputs[2:]
+            else:
+                output = (reshaped_logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
         return MultipleChoiceModelOutput(
