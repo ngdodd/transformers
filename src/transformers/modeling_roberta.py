@@ -1100,15 +1100,20 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
             # Get reasoning logits: RC maps from n_choices x H -> n_choices x n_reasoning_types
             # where H is the size of the hidden pooled_output dim
             reasoning_logits = self.reasoning_classifier(pooled_output)
+            
+            # Use pre-softmaxed ensembled reasoning logits as input to CE loss
             ensembled_reasoning_logits = torch.mean(reasoning_logits, dim=0)
             reshaped_ensembled_reasoning_logits = ensembled_reasoning_logits.view(-1, self.config.num_reasoning_types)
+            
+            # TODO: Ensemble before or after softmax? https://forums.fast.ai/t/ensembling-logits-or-probabilities/81723/3
+            softmaxed_reasoning_logits = torch.nn.functional.softmax(reasoning_logits, dim=1)
             
             # Concat reasoning_logits to pooled output to form new inputs to the
             # final QA classifier: 
             #       reasoning_logits     - n_choices x n_reasoning_types
             #       pooled_output        - n_choices x H
             #       mcq_classifier_input - n_choices x (n_reasoning_types + H)
-            classifier_input = torch.cat((pooled_output, reasoning_logits), dim=1) # TODO: revisit if this is inefficient
+            classifier_input = torch.cat((pooled_output, softmaxed_reasoning_logits), dim=1) # TODO: revisit if this is inefficient
             logits = self.augmented_classifier(classifier_input)
             
         else:
