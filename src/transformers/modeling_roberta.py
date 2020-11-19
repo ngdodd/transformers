@@ -1127,8 +1127,7 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
                 classifier_output = self.augmented_classifiers[k](classifier_input)
                 all_logits[k,:] = classifier_output.view(-1, num_choices)
             
-            softmaxed_all_logits = nn.functional.softmax(all_logits, dim=1)
-            logits = torch.mean(softmaxed_all_logits*ensembled_softmaxed_reasoning_logits.view(-1,1), dim=0)
+            logits = torch.mean(all_logits*ensembled_softmaxed_reasoning_logits.view(-1,1), dim=0)
             
         else:
             logits = self.classifier(pooled_output)
