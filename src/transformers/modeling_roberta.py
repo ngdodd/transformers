@@ -1036,9 +1036,9 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         self.roberta = RobertaModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
-        self.augmented_classifier = nn.Linear(config.hidden_size+config.num_reasoning_types, 1)
+        self.augmented_classifiers = nn.ModuleList([nn.Linear(config.hidden_size+config.num_reasoning_types, 1) \
+            for _ in range(config.num_reasoning_types)]) if config.with_reasoning_types else None
         self.reasoning_classifier = torch.nn.Linear(config.hidden_size, config.num_reasoning_types) if config.with_reasoning_types else None
-        
         self.init_weights()
 
     @add_start_docstrings_to_model_forward(ROBERTA_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
@@ -1107,6 +1107,7 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
             
             # TODO: Ensemble before or after softmax? https://forums.fast.ai/t/ensembling-logits-or-probabilities/81723/3
             softmaxed_reasoning_logits = torch.nn.functional.softmax(reasoning_logits, dim=1)
+            ensembled_softmaxed_reasoning_logits = torch.mean(softmaxed_reasoning_logits, dim=0)
             
             # Concat reasoning_logits to pooled output to form new inputs to the
             # final QA classifier: 
@@ -1114,7 +1115,20 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
             #       pooled_output        - n_choices x H
             #       mcq_classifier_input - n_choices x (n_reasoning_types + H)
             classifier_input = torch.cat((pooled_output, softmaxed_reasoning_logits), dim=1) # TODO: revisit if this is inefficient
-            logits = self.augmented_classifier(classifier_input)
+            
+            # Pass the augmented pooled_output+softmaxed_reasoning_logits through
+            # a sequence of classifiers. One for each reasoning type. Then, take
+            # a weighted average of the augmented classifier outputs, weighted
+            # by the softmaxed reasoning logits in order to form the mcq logits.
+            all_logits = torch.empty((self.config.num_reasoning_types, num_choices), 
+                                     dtype=torch.float,
+                                     device=classifier_input.device)
+            for k in range(self.config.num_reasoning_types):
+                classifier_output = self.augmented_classifiers[k](classifier_input)
+                all_logits[k,:] = classifier_output.view(-1, num_choices)
+            
+            softmaxed_all_logits = nn.functional.softmax(all_logits, dim=1)
+            logits = torch.mean(softmaxed_all_logits*ensembled_softmaxed_reasoning_logits.view(-1,1), dim=0)
             
         else:
             logits = self.classifier(pooled_output)
