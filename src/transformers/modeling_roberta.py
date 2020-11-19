@@ -1036,7 +1036,9 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
         self.roberta = RobertaModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
-        self.augmented_classifiers = nn.ModuleList([nn.Linear(config.hidden_size+config.num_reasoning_types, 1) \
+        self.augmented_classifiers = nn.ModuleList([nn.Linear(config.hidden_size, 1) \
+            for _ in range(config.num_reasoning_types)]) if config.with_reasoning_types else None
+        self.augmented_batch_norms = nn.ModuleList([nn.BatchNorm1d(config.hidden_size+config.num_reasoning_types) \
             for _ in range(config.num_reasoning_types)]) if config.with_reasoning_types else None
         self.reasoning_classifier = torch.nn.Linear(config.hidden_size, config.num_reasoning_types) if config.with_reasoning_types else None
         self.init_weights()
@@ -1109,6 +1111,7 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
             softmaxed_reasoning_logits = torch.nn.functional.softmax(reasoning_logits, dim=1)
             ensembled_softmaxed_reasoning_logits = torch.mean(softmaxed_reasoning_logits, dim=0)
             
+            """
             # Concat reasoning_logits to pooled output to form new inputs to the
             # final QA classifier: 
             #       reasoning_logits     - n_choices x n_reasoning_types
@@ -1124,10 +1127,14 @@ class RobertaForMultipleChoice(RobertaPreTrainedModel):
                                      dtype=torch.float,
                                      device=classifier_input.device)
             for k in range(self.config.num_reasoning_types):
-                classifier_output = self.augmented_classifiers[k](classifier_input)
+                normed_inputs = self.augmented_batch_norms[k](classifier_input)
+                classifier_output = self.augmented_classifiers[k](normed_inputs)
                 all_logits[k,:] = classifier_output.view(-1, num_choices)
-            
+
             logits = torch.mean(all_logits*ensembled_softmaxed_reasoning_logits.view(-1,1), dim=0)
+            """
+            
+            logits = self.augmented_classifiers[torch.argmax(ensembled_softmaxed_reasoning_logits)](pooled_output)
             
         else:
             logits = self.classifier(pooled_output)
