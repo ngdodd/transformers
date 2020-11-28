@@ -23,12 +23,18 @@ import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import tqdm
+import tqdm.notebook as tq
 
 from filelock import FileLock
-from transformers import PreTrainedTokenizer, is_tf_available, is_torch_available
+from transformers import (
+    PreTrainedTokenizer,
+    Trainer,
+    is_tf_available, 
+    is_torch_available,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -95,6 +101,7 @@ if is_torch_available():
             max_seq_length: Optional[int] = None,
             overwrite_cache=False,
             mode: Split = Split.train,
+            file_name: Optional[str] = None,
         ):
             processor = processors[task]()
 
@@ -112,7 +119,6 @@ if is_torch_available():
             # and the others will use the cache.
             lock_path = cached_features_file + ".lock"
             with FileLock(lock_path):
-
                 if os.path.exists(cached_features_file) and not overwrite_cache:
                     logger.info(f"Loading features from cached file {cached_features_file}")
                     self.features = torch.load(cached_features_file)
@@ -120,11 +126,14 @@ if is_torch_available():
                     logger.info(f"Creating features from dataset file at {data_dir}")
                     label_list = processor.get_labels()
                     if mode == Split.dev:
-                        examples = processor.get_dev_examples(data_dir)
+                        file_name = "dev.jsonl" if file_name == None else file_name
+                        examples = processor.get_dev_examples(data_dir, file_name)
                     elif mode == Split.test:
-                        examples = processor.get_test_examples(data_dir)
+                        file_name = "challenge.jsonl" if file_name == None else file_name
+                        examples = processor.get_test_examples(data_dir, file_name)
                     else:
-                        examples = processor.get_train_examples(data_dir)
+                        file_name = "train.jsonl" if file_name == None else file_name
+                        examples = processor.get_train_examples(data_dir, file_name)
                     logger.info("Training examples: %s", len(examples))
                     self.features = convert_examples_to_features(
                         examples,
@@ -134,7 +143,7 @@ if is_torch_available():
                     )
                     logger.info("Saving features into cached file %s", cached_features_file)
                     torch.save(self.features, cached_features_file)
-
+                
         def __len__(self):
             return len(self.features)
 
@@ -161,17 +170,18 @@ if is_tf_available():
             max_seq_length: Optional[int] = 128,
             overwrite_cache=False,
             mode: Split = Split.train,
+            file_name: Optional[str] = None,
         ):
             processor = processors[task]()
 
             logger.info(f"Creating features from dataset file at {data_dir}")
             label_list = processor.get_labels()
             if mode == Split.dev:
-                examples = processor.get_dev_examples(data_dir)
+                examples = processor.get_dev_examples(data_dir, file_name)
             elif mode == Split.test:
-                examples = processor.get_test_examples(data_dir)
+                examples = processor.get_test_examples(data_dir, file_name)
             else:
-                examples = processor.get_train_examples(data_dir)
+                examples = processor.get_train_examples(data_dir, file_name)
             logger.info("Training examples: %s", len(examples))
 
             self.features = convert_examples_to_features(
@@ -233,15 +243,15 @@ if is_tf_available():
 class DataProcessor:
     """Base class for data converters for multiple choice data sets."""
 
-    def get_train_examples(self, data_dir):
+    def get_train_examples(self, data_dir, train_file):
         """Gets a collection of `InputExample`s for the train set."""
         raise NotImplementedError()
 
-    def get_dev_examples(self, data_dir):
+    def get_dev_examples(self, data_dir, dev_file):
         """Gets a collection of `InputExample`s for the dev set."""
         raise NotImplementedError()
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self, data_dir, test_file):
         """Gets a collection of `InputExample`s for the test set."""
         raise NotImplementedError()
 
@@ -253,7 +263,7 @@ class DataProcessor:
 class RaceProcessor(DataProcessor):
     """Processor for the RACE data set."""
 
-    def get_train_examples(self, data_dir):
+    def get_train_examples(self, data_dir, train_file=''):
         """See base class."""
         logger.info("LOOKING AT {} train".format(data_dir))
         high = os.path.join(data_dir, "train/high")
@@ -262,7 +272,7 @@ class RaceProcessor(DataProcessor):
         middle = self._read_txt(middle)
         return self._create_examples(high + middle, "train")
 
-    def get_dev_examples(self, data_dir):
+    def get_dev_examples(self, data_dir, dev_file=''):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
         high = os.path.join(data_dir, "dev/high")
@@ -271,7 +281,7 @@ class RaceProcessor(DataProcessor):
         middle = self._read_txt(middle)
         return self._create_examples(high + middle, "dev")
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self, data_dir, test_file=''):
         """See base class."""
         logger.info("LOOKING AT {} test".format(data_dir))
         high = os.path.join(data_dir, "test/high")
@@ -320,17 +330,17 @@ class RaceProcessor(DataProcessor):
 class SynonymProcessor(DataProcessor):
     """Processor for the Synonym data set."""
 
-    def get_train_examples(self, data_dir):
+    def get_train_examples(self, data_dir, train_file=''):
         """See base class."""
         logger.info("LOOKING AT {} train".format(data_dir))
         return self._create_examples(self._read_csv(os.path.join(data_dir, "mctrain.csv")), "train")
 
-    def get_dev_examples(self, data_dir):
+    def get_dev_examples(self, data_dir, dev_file=''):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
         return self._create_examples(self._read_csv(os.path.join(data_dir, "mchp.csv")), "dev")
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self, data_dir, test_file=''):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
 
@@ -366,17 +376,17 @@ class SynonymProcessor(DataProcessor):
 class SwagProcessor(DataProcessor):
     """Processor for the SWAG data set."""
 
-    def get_train_examples(self, data_dir):
+    def get_train_examples(self, data_dir, train_file=''):
         """See base class."""
         logger.info("LOOKING AT {} train".format(data_dir))
         return self._create_examples(self._read_csv(os.path.join(data_dir, "train.csv")), "train")
 
-    def get_dev_examples(self, data_dir):
+    def get_dev_examples(self, data_dir, dev_file=''):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
         return self._create_examples(self._read_csv(os.path.join(data_dir, "val.csv")), "dev")
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self, data_dir, test_file=''):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
         raise ValueError(
@@ -417,17 +427,17 @@ class SwagProcessor(DataProcessor):
 class ArcProcessor(DataProcessor):
     """Processor for the ARC data set (request from allennlp)."""
 
-    def get_train_examples(self, data_dir):
+    def get_train_examples(self, data_dir, train_file=''):
         """See base class."""
         logger.info("LOOKING AT {} train".format(data_dir))
         return self._create_examples(self._read_json(os.path.join(data_dir, "train.jsonl")), "train")
 
-    def get_dev_examples(self, data_dir):
+    def get_dev_examples(self, data_dir, dev_file=''):
         """See base class."""
         logger.info("LOOKING AT {} dev".format(data_dir))
         return self._create_examples(self._read_json(os.path.join(data_dir, "dev.jsonl")), "dev")
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self, data_dir, test_file=''):
         logger.info("LOOKING AT {} test".format(data_dir))
         return self._create_examples(self._read_json(os.path.join(data_dir, "test.jsonl")), "test")
 
@@ -505,18 +515,18 @@ class ArcProcessor(DataProcessor):
         return examples
     
 class QuailProcessor(DataProcessor):
-    def get_train_examples(self, data_dir):
+    def get_train_examples(self, data_dir, train_file='train.jsonl'):
         print("LOOKING AT {} train".format(data_dir))
-        return self._create_examples(self._read_json(os.path.join(data_dir, "train.jsonl")), "train")
+        return self._create_examples(self._read_json(os.path.join(data_dir, train_file)), "train")
     
-    def get_dev_examples(self, data_dir):
+    def get_dev_examples(self, data_dir, dev_file='dev.jsonl'):
         """See base class."""
         print("LOOKING AT {} dev".format(data_dir))
-        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.jsonl")), "dev")
+        return self._create_examples(self._read_json(os.path.join(data_dir, dev_file)), "dev")
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self, data_dir, test_file='challenge.jsonl'):
         print("LOOKING AT {} test".format(data_dir))
-        return self._create_examples(self._read_json(os.path.join(data_dir, "challenge.jsonl")), "test")
+        return self._create_examples(self._read_json(os.path.join(data_dir, test_file)), "test")
 
     def get_labels(self):
         """See base class."""
@@ -561,8 +571,8 @@ def convert_examples_to_features(
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in tqdm.tqdm(enumerate(examples), desc="convert examples to features"):
-        if ex_index % 10000 == 0:
+    for (ex_index, example) in tq.tqdm(enumerate(examples), desc="convert examples to features"):
+        if ex_index % 1000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         choices_inputs = []
         for ending_idx, (context, ending) in enumerate(zip(example.contexts, example.endings)):
@@ -617,6 +627,47 @@ def convert_examples_to_features(
         logger.info("feature: %s" % f)
 
     return features
+
+def breakdown_reasoning_accuracy(
+    trainer: Trainer,
+    dev_key: Optional[str],
+    preds_map: Dict,
+    save_path: str,
+) -> None:
+    
+    # Early return and do nothing if no dev key is specified
+    if not dev_key:
+        return
+    
+    if trainer.is_world_master():
+        try:
+            with open(dev_key, 'r', encoding='utf-8') as g:
+                gold = json.load(g)
+        except IOError:
+            print("Dev key not found at {}, aborting reasoning accuracy breakdown.".format(dev_key))
+            return
+            
+        type_lookup = {}
+        for type_, subset in gold.items():
+            for id_, label in subset.items():
+                type_lookup[id_] = type_    
+    
+        accuracies = {key: [] for key in gold.keys()}
+        n_questions = len(preds_map)
+        for id_, ans in preds_map.items():
+            q_type = type_lookup[id_]
+            accuracies[q_type].append(int(gold[q_type][id_]==ans))
+        total_accuracy = sum([sum(values) for values in accuracies.values()])/n_questions
+        accuracies = {key: 100*sum(values)/len(values) for key, values in accuracies.items() if len(values) > 0}
+        accuracies['Total'] = total_accuracy*100
+        
+    logger.info("\n***** Reasoning Type Accuracies *****")
+    for key, value in accuracies.items():
+        logger.info("  %s = %s", key, value)
+    logger.info("\n\n\n\n")
+    
+    with open(save_path, 'w', encoding='utf-8') as w:
+        json.dump(accuracies, w, indent=2)
 
 
 processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor, "syn": SynonymProcessor, "quail": QuailProcessor}

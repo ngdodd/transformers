@@ -34,7 +34,13 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
-from utils_multiple_choice import MultipleChoiceDataset, Split, processors
+
+from utils_multiple_choice import (
+    MultipleChoiceDataset, 
+    Split, 
+    breakdown_reasoning_accuracy, 
+    processors
+)
 
 
 logger = logging.getLogger(__name__)
@@ -81,6 +87,85 @@ class DataTrainingArguments:
     )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+    )
+    quail_dev_key_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "The location of the quail dev key to use during evaluation."}
+    )
+    custom_training_filename: Optional[str] = field(
+        default=None,
+        metadata={"help": "Filename of the custom training set to use during model training."}
+    )
+    custom_eval_filename: Optional[str] = field(
+        default=None,
+        metadata={"help": "File name for custom dev set to evaluate the model on."}
+    )
+    custom_dev_key_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "The location of the dev key to use with the custom dev set."}
+    )
+    eval_on_training_set: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Flag controlling whether or not to do an additional round of evaluation \
+                                 on the training set, to analyze cases of overfitting."}
+    )
+                  
+def evaluate_model(
+    trainer: Trainer,
+    eval_dataset: MultipleChoiceDataset,
+    eval_name: str,
+    training_args: TrainingArguments,
+    data_args: DataTrainingArguments,
+    dev_key: Optional[str] = None,
+) -> None:
+    """
+    Parameters
+    ----------
+    trainer : Trainer
+        Huggingface trainer object that will be used to obtain model predictions.
+    eval_dataset : MultipleChoiceDataset
+        Featurized dataset which will be used to evaluate the model.
+    eval_name : str
+        A descriptive name for this evaluation round used to distinguish results.
+    training_args : TrainingArguments
+        Set of training related arguments specified when running the script.
+    data_args : DataTrainingArguments
+        Set of data related arguments specified when running the script.
+    dev_key : Optional[str]
+        Filename of the dev key used to break down accuracy across reasoning types.
+    """
+    logger.info("*** Evaluate ***")
+    predictions = trainer.predict(eval_dataset)
+    
+    # Get mcq preds, labels, and metrics
+    mcq_preds = np.argmax(predictions.predictions, axis=1)
+   
+    # Create result dictionaries to be dumped to output json files
+    ids = [feature.example_id for feature in eval_dataset.features]
+    mcq_results = {id: pred for id, pred in zip(ids, mcq_preds.tolist())}
+    
+    # Predictions to be used in eval script
+    output_preds_file = os.path.join(training_args.output_dir, "{}_preds.json".format(eval_name))
+    if trainer.is_world_master():
+        with open(output_preds_file, 'w', encoding='utf-8') as writer:
+            json.dump(mcq_results, writer, separators=(',', ':'), sort_keys=True, indent=4)
+            
+    # Write prediction metrics to file
+    output_metrics_file = os.path.join(training_args.output_dir, "{}_metrics.json".format(eval_name))
+    if trainer.is_world_master():
+        with open(output_metrics_file, 'w', encoding='utf-8') as writer:
+            json.dump(predictions.metrics, writer, separators=(',', ':'), sort_keys=True, indent=4)
+    
+    if trainer.is_world_master():
+        logger.info("\n\n\n\n***** {} Results *****".format(eval_name))
+        for key, value in predictions.metrics.items():
+            logger.info("  %s = %s", key, value)
+            
+    breakdown_reasoning_accuracy(
+        trainer=trainer,
+        dev_key=dev_key,
+        preds_map=mcq_results,
+        save_path=os.path.join(training_args.output_dir, "{}_results.json".format(eval_name))
     )
 
 
@@ -150,8 +235,9 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
-
+    
     # Get datasets
+    training_file_name = data_args.custom_training_filename if data_args.custom_training_filename else None
     train_dataset = (
         MultipleChoiceDataset(
             data_dir=data_args.data_dir,
@@ -160,6 +246,7 @@ def main():
             max_seq_length=data_args.max_seq_length,
             overwrite_cache=data_args.overwrite_cache,
             mode=Split.train,
+            file_name=training_file_name,
         )
         if training_args.do_train
         else None
@@ -189,6 +276,7 @@ def main():
         eval_dataset=eval_dataset,
         compute_metrics=compute_metrics,
     )
+    
 
     # Training
     if training_args.do_train:
@@ -202,43 +290,55 @@ def main():
             tokenizer.save_pretrained(training_args.output_dir)
             
     # Evaluation
-    results = {}
     if training_args.do_eval:
-        logger.info("*** Evaluate ***")
-
-        predictions = trainer.predict(eval_dataset)
-        preds = np.argmax(predictions.predictions, axis=1)
-        ids = [feature.example_id for feature in eval_dataset.features]
-        results = {id: pred for id, pred in zip(ids, preds.tolist())}
-
-        output_preds_file = os.path.join(training_args.output_dir, "preds.json")
-        if trainer.is_world_master():
-            with open(output_preds_file, 'w', encoding='utf-8') as writer:
-                json.dump(results, writer, separators=(',', ':'), sort_keys=True, indent=4)
-
-        output_labels_file = os.path.join(training_args.output_dir, "labels.json")
-        if trainer.is_world_master():
-            with open(output_labels_file, 'w', encoding='utf-8') as writer:
-                json.dump(predictions.label_ids.tolist(), writer, separators=(',', ':'), sort_keys=True, indent=4)
-
-        output_metrics_file = os.path.join(training_args.output_dir, "metrics.json")
-        if trainer.is_world_master():
-            with open(output_metrics_file, 'w', encoding='utf-8') as writer:
-                json.dump(predictions.metrics, writer, separators=(',', ':'), sort_keys=True, indent=4)
+        evaluate_model(
+            trainer=trainer, 
+            eval_dataset=eval_dataset,
+            eval_name="Quail_Dev_Eval",
+            training_args=training_args,
+            data_args=data_args,
+            dev_key=data_args.quail_dev_key_path
+        )
         
-        result = trainer.evaluate()
-
-        output_eval_file = os.path.join(training_args.output_dir, "eval_results.txt")
-        if trainer.is_world_master():
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                for key, value in result.items():
-                    logger.info("  %s = %s", key, value)
-                    writer.write("%s = %s\n" % (key, value))
-
-                results.update(result)
-
-    return results
+        if data_args.custom_eval_filename:
+            custom_eval_dataset = MultipleChoiceDataset(
+                data_dir=data_args.data_dir,
+                file_name=data_args.custom_eval_filename,
+                tokenizer=tokenizer,
+                task=data_args.task_name,
+                max_seq_length=data_args.max_seq_length,
+                overwrite_cache=data_args.overwrite_cache,
+                mode=Split.dev,
+            )
+            evaluate_model(
+                trainer=trainer,
+                eval_dataset=custom_eval_dataset,
+                eval_name='Custom_Dev_Eval',
+                training_args=training_args,
+                data_args=data_args,
+                dev_key=data_args.custom_dev_key_path
+            )
+            
+        if data_args.eval_on_training_set:
+            if not training_args.do_train:
+                train_dataset = MultipleChoiceDataset(
+                    data_dir=data_args.data_dir,
+                    tokenizer=tokenizer,
+                    task=data_args.task_name,
+                    max_seq_length=data_args.max_seq_length,
+                    overwrite_cache=data_args.overwrite_cache,
+                    mode=Split.train,
+                    file_name=training_file_name,
+                )
+                
+            evaluate_model(
+                trainer=trainer,
+                eval_dataset=train_dataset,
+                eval_name='Train_Eval',
+                training_args=training_args,
+                data_args=data_args,
+                dev_key=data_args.custom_dev_key_path
+            )
 
 
 def _mp_fn(index):

@@ -23,7 +23,7 @@ def main():
         q_type = type_lookup[id_]
         accuracies[q_type].append(int(gold[q_type][id_]==ans))
     total_accuracy = sum([sum(values) for values in accuracies.values()])/n_questions
-    accuracies = {key: 100*sum(values)/len(values) for key, values in accuracies.items()}
+    accuracies = {key: 100*sum(values)/len(values) for key, values in accuracies.items() if len(values) > 0}
     accuracies['Total'] = total_accuracy*100
     
     with open(args.out_file, 'w', encoding='utf-8') as w:
