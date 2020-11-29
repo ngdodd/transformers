@@ -26,7 +26,6 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 import tqdm
-import tqdm.notebook as tq
 
 from filelock import FileLock
 from transformers import (
@@ -571,7 +570,7 @@ def convert_examples_to_features(
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in tq.tqdm(enumerate(examples), desc="convert examples to features"):
+    for (ex_index, example) in tqdm.tqdm(enumerate(examples), desc="convert examples to features"):
         if ex_index % 1000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
         choices_inputs = []
