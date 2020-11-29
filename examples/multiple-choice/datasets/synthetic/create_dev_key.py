@@ -13,7 +13,7 @@ def write_dev_key(dataset, types, path, verbose):
 
     if verbose:    
         print("\ntype_map: {}".format(type_map))
-        print(key_map)
+        print("\nKey: {}".format(key_map))
 
     with open(path, 'w', encoding='utf-8') as w:
        json.dump(key_map, w)
@@ -25,12 +25,17 @@ def main():
     parser.add_argument('--verbose', type=bool, default=False, help='Turn on verbose mode to see the key map creation printed to console.')
     args = parser.parse_args()
     
-    types = ["Causality", "Sequential", "Character_identity", "Unanswerable"]
     dataset = load_dataset('json', data_files=args.in_file)['train']
     if args.verbose:
         print(dataset)
+    
+    # Do a pass through the dataset to get the question types used
+    question_types = {}
+    for entry in dataset:
+        if entry['question_type'] not in question_types:
+            question_types[entry['question_type']] = 1
 
-    write_dev_key(dataset, types, args.out_file, args.verbose)
+    write_dev_key(dataset, list(question_types.keys()), args.out_file, args.verbose)
     
 if __name__ == "__main__":
     main()
