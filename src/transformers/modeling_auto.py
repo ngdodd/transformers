@@ -98,6 +98,8 @@ from .modeling_camembert import (
 from .modeling_ctrl import CTRLLMHeadModel, CTRLModel
 from .modeling_deberta import (
     DebertaForMultipleChoice,
+    DebertaForMultipleChoiceAndUnanswerable,
+    DebertaForMultipleChoiceAndReasoningTypes,
     DebertaForSequenceClassification, 
     DebertaModel,
 )
